@@ -1,0 +1,12 @@
+[Unit]
+Description=Xiaomi temperature sensors polling service
+After=network.target
+Requires=zabbix-agent.service
+
+[Service]
+Type=simple
+PIDFile=/run/mijia.pid
+ExecStart=/usr/local/bin/mitemp-poll.py
+
+[Install]
+WantedBy=multi-user.target
