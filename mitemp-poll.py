@@ -190,6 +190,7 @@ class Scanner(object):
         self.__statesdir = statesdir
         self.__period = period
         self.__workers = {}
+        os.makedirs(statesdir, exist_ok=True)
 
     def start(self):
         while True:
