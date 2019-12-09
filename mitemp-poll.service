@@ -5,7 +5,12 @@ Requires=zabbix-agent.service
 
 [Service]
 Type=simple
+Restart=always
 PIDFile=/run/mijia.pid
+#Operating mode with handler:
+#Environment=ZABBIX=X.X.X.X HOST=Y.Y.Y.Y
+#ExecStart=/usr/local/bin/mitemp-poll.py --handler 'zabbix_sender -z ${ZABBIX} -s ${HOST} -k "climate.value[{mac},{type}]" -o {value}'
+#or legacy operating mode with tempdir
 ExecStart=/usr/local/bin/mitemp-poll.py
 
 [Install]
