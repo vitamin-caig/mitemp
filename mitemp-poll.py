@@ -35,6 +35,8 @@ class Controller(object):
         self._pipe.sendline('scan on')
         self._pipe.expect('Discovery started')
         self._pipe.sendline('devices')
+
+    def listen(self):
         lastevent = None
         while True:
             line = self._pipe.readline().strip()
@@ -216,7 +218,14 @@ class DevicesList(object):
         self._status = ConnectionStatus()
         self._rr_index = -1
 
-    def process_event(self, evt):
+    def start(self, dst):
+        self._ctrl.scan()
+        for evt in self._ctrl.listen():
+            for d in self._process_event(evt):
+                dst(*d)
+
+
+    def _process_event(self, evt):
         self._dispatch_connections()
         if evt.mac not in self._devs:
             self._maybe_add_device(evt)
@@ -265,36 +274,39 @@ class DevicesList(object):
         self._status.connect(dev._mac)
         self._ctrl.connect(dev._mac)
 
-def listen(timeout):
-    ctrl = Controller(timeout)
-    devs = DevicesList(ctrl)
-    for evt in ctrl.scan():
-        for d in devs.process_event(evt):
-            yield d
+class Handler(object):
+    def __init__(self, handler):
+        self._handler = handler
 
-def debounce(stream, timeout):
-    filt = {}
-    for mac, type, val in stream:
-        now = datetime.now()
-        key = (mac, type)
-        (prev, ts) = filt.get(key, (None, None))
-        if prev == val and now - ts < timeout:
-            logging.debug(f'Drop {mac}: {type}={val}')
-        else:
-            filt[key] = (val, now)
-            yield (mac, type, val)
-
-def scan_handler(src, handler):
-    for mac, type, val in src:
-        cmd = handler.format(mac=mac, type=type.lower(), value=val)
+    def __call__(self, mac, type, value):
+        cmd = self._handler.format(mac=mac, type=type.lower(), value=value)
         res = call(cmd, shell=True)
         logging.debug('[%s] returned %u', cmd, res)
 
-def scan_format(src, format):
-    for mac, type, val in src:
-        str = format.format(mac=mac, type=type.lower(), value=val)
+class Format(object):
+    def __init__(self, format):
+        self._format = format
+
+    def __call__(self, mac, type, value):
+        str = self._format.format(mac=mac, type=type.lower(), value=value)
         logging.debug(f"Emit '{str}'")
         print(str, flush=True)
+
+class Debouncer(object):
+    def __init__(self, delegate, timeout):
+        self._delegate = delegate
+        self._timeout = timeout
+        self._filt = dict()
+
+    def __call__(self, mac, type, value):
+        now = datetime.now()
+        key = (mac, type)
+        (prev, ts) = self._filt.get(key, (None, None))
+        if prev == value and now - ts < self._timeout:
+            logging.debug(f'Drop {mac}: {type}={value}')
+        else:
+            self._filt[key] = (value, now)
+            self._delegate(mac, type, value)
 
 def main():
     parser = ArgumentParser(description='Mijia scanning daemon')
@@ -309,16 +321,18 @@ def main():
     if args.verbose:
         logging.basicConfig(level=logging.DEBUG)
 
-    src = listen(timedelta(minutes=args.timeout))
-    if args.debounce:
-        src = debounce(src, timedelta(seconds=args.debounce))
-
     if args.handler:
-        scan_handler(src, args.handler)
+        dst = Handler(args.handler)
     elif args.format:
-        scan_format(src, args.format)
+        dst = Format(args.format)
     else:
         raise 'Nor --handler neigher --format specified'
+    if args.debounce:
+        dst = Debouncer(dst, timedelta(seconds=args.debounce))
+
+    ctrl = Controller(timedelta(minutes=args.timeout))
+    devs = DevicesList(ctrl)
+    devs.start(dst)
 
 if __name__ == '__main__':
     main()
